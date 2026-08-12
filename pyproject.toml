@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pika-umi"
+version = "0.1.0"
+description = "Pika handheld FastUMI data collection and LeRobot training"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+dependencies = [
+  "lerobot==0.4.3",
+  "numpy>=1.24",
+  "pyyaml",
+  "agx-pypika",
+  "opencv-python",
+]
+
+[project.scripts]
+uf-lerobot-record = "lerobot_robot_ufactory.scripts.uf_lerobot_record:main"
+uf-lerobot-train = "lerobot_robot_ufactory.scripts.uf_lerobot_train:main"
+uf-pika-inspect = "lerobot_robot_ufactory.pika_direct.inspection:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

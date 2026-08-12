@@ -1,0 +1,32 @@
+# FastUMI-style handheld Pika acquisition. No Piper, CAN, teleop or robot base
+# calibration is involved. Replace device and camera paths before recording.
+robot:
+  type: uf::pika_direct
+  id: pika_handheld
+  port: /dev/ttyUSB0
+  tracker_device_id: T20
+  tracker_to_tcp:
+    translation_m: [0.0, 0.0, 0.0]
+    rotation_quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+  gripper_closed_width_mm: 0.4
+  gripper_open_width_mm: 98.1
+  cameras:
+    pika:
+      type: opencv
+      index_or_path: /dev/v4l/by-id/REPLACE_PIKA_CAMERA
+      width: 640
+      height: 480
+      fps: 30
+      fourcc: MJPG
+
+# PikaDirectRobot is read-only and supplies the absolute TCP action paired
+# with each observation, so no teleoperation configuration is needed.
+dataset:
+  root: ./data/pika_direct
+  repo_id: local/pika_direct
+  single_task: REPLACE_TASK_DESCRIPTION
+  fps: 30
+  episode_time_s: 30
+  reset_time_s: 10
+  num_episodes: 50
+  push_to_hub: false
