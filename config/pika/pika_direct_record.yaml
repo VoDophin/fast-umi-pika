@@ -1,7 +1,7 @@
 # FastUMI-style handheld Pika acquisition. No Piper, CAN, teleop or robot base
 # calibration is involved. Replace device and camera paths before recording.
 robot:
-  type: uf::pika_direct
+#  type: uf::pika_direct
   id: pika_handheld
   port: /dev/ttyUSB0
   tracker_device_id: T20
@@ -11,13 +11,18 @@ robot:
   gripper_closed_width_mm: 0.4
   gripper_open_width_mm: 98.1
   cameras:
-    pika:
+    hand_rgb:                   # 手部非鱼眼 RGB（RealSense 405）
       type: opencv
-      index_or_path: /dev/v4l/by-id/REPLACE_PIKA_CAMERA
+      index_or_path: "/dev/v4l/by-id/usb-Intel_R__RealSense_TM__Depth_Camera_405_Intel_R__RealSense_TM__Depth_Camera_405_242223072066-video-index4"
       width: 640
       height: 480
       fps: 30
-      fourcc: MJPG
+    third_person:               # 固定第三视角（RealSense 435i）
+      type: opencv
+      index_or_path: "/dev/v4l/by-id/usb-Intel_R__RealSense_TM__Depth_Camera_435i_Intel_R__RealSense_TM__Depth_Camera_435i-video-index0"
+      width: 640
+      height: 480
+      fps: 30
 
 # PikaDirectRobot is read-only and supplies the absolute TCP action paired
 # with each observation, so no teleoperation configuration is needed.
