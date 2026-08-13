@@ -168,6 +168,7 @@ def test_real_lerobot_policy_accepts_umi_batch_and_backpropagates(policy_type):
             diffusion_step_embed_dim=32,
             n_groups=4,
             do_mask_loss_for_padding=True,
+            crop_shape=(64,64),
         )
 
     policy_cfg = make_policy_config(policy_type, **kwargs)
