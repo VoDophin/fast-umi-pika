@@ -7,7 +7,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger('pika_device')
 
 
-def get_serial_ports(vidpid='1a86:7522'):
+def get_serial_ports(vidpid='1a86:7522'):  # gripper 和 sense 的vidpid都是1a86:7522
     """
     搜索所有指定vidpid的串口
     vidpid: 指定设备的VID:PID字符串, 默认值为'1a86:7522'
@@ -18,7 +18,7 @@ def get_serial_ports(vidpid='1a86:7522'):
     pika_ports = []
     for port in ports:
         if port.vid is not None and port.pid is not None:
-            if '{:04x}:{:04x}'.format(port.vid, port.pid) == vidpid:
+            if '{:04x}:{:04x}'.format(port.vid, port.pid) == vidpid: # 转化为16进制后在进行比较
                 pika_ports.append(port.device)
             # else:
             #     print('pidvid:', '{:04x}:{:04x}'.format(port.vid, port.pid))
@@ -39,12 +39,12 @@ def check_pika_device(port):
             port=port,
             baudrate=460800,
             bytesize=serial.EIGHTBITS,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE,
+            parity=serial.PARITY_NONE, # 无校验位
+            stopbits=serial.STOPBITS_ONE, # 无停止位
             timeout=1.0
         )
         time.sleep(0.5)  # 等待串口稳定
-        data = b''
+        data = b''  # 空Bytes对象，用于不断存储读取的数据
         expired_time = time.monotonic() + 1.0  # 最多等待1秒
         while time.monotonic() < expired_time:
             if ser.in_waiting > 0:
@@ -73,21 +73,21 @@ class PikaDevice(object):
     # _pika_sense_port = None
     # _pika_gripper_port = None
     # _lock = threading.Lock()
-    PIKA_DEVICE_MAP = {}
+    PIKA_DEVICE_MAP = {}  # 串口路径 → 已连接的设备对象 避免重复连接
 
-    def __init__(self, dev_type=1, **kwargs):
+    def __init__(self, dev_type=1, **kwargs): # 确定设备位置
         """
         port: serial port
-        dev_type: 1: sense, 2: gripper
+        dev_type: 1: sense, 2: gripper, 3：both
         """
         if dev_type not in [1, 2, 3]:
             raise ValueError('不支持dev_type={}'.format(dev_type))
 
-        self._dev_type = dev_type
-        self._pika_sense_port = kwargs.get('pika_sense_port', None)
+        self._dev_type = dev_type  # 该参数预设该设备是什么类型
+        self._pika_sense_port = kwargs.get('pika_sense_port', None)  # None表示后续再找
         self._pika_gripper_port = kwargs.get('pika_gripper_port', None)
 
-        use_pika_sense = self._dev_type in [1, 3]
+        use_pika_sense = self._dev_type in [1, 3]  # 局部使用 不是对象变量
         use_pika_gripper = self._dev_type in [2, 3]
 
         self._pika_sense = None
@@ -100,7 +100,7 @@ class PikaDevice(object):
                 exit(1)
 
             for port in pika_ports:
-                device_type = check_pika_device(port)
+                device_type = check_pika_device(port)  # 会靠device_type区分sense和gripper 该参数是在check_pika_device函数中返回的
                 if device_type == 1 and use_pika_sense and self._pika_sense_port is None:
                     self._pika_sense_port = port
                     logger.info('✓ 检测到 Pika Sense 设备: {}'.format(port))
@@ -125,7 +125,7 @@ class PikaDevice(object):
         if use_pika_gripper:
             print('Pika Gripper 设备:', self._pika_gripper_port)
 
-        self.pika_tracker_device = kwargs.get('pika_tracker_device', None)
+        self.pika_tracker_device = kwargs.get('pika_tracker_device', None)  # ？？
 
     # def __new__(cls, *args, **kwargs):
     #     if not cls._instance:
@@ -141,12 +141,12 @@ class PikaDevice(object):
         if self._pika_gripper:
             self._pika_gripper.disconnect()
 
-    @property
-    def pika_sense(self):
+    @property  # 按照变量的方式调用方法 device.pika_sense
+    def pika_sense(self):  # 第一次访问时才真正连接 Sense
         if self._dev_type not in [1, 3]:
             return None
-        if self._pika_sense is None:
-            if self._pika_sense_port in self.PIKA_DEVICE_MAP:
+        if self._pika_sense is None:  # 没有初始化
+            if self._pika_sense_port in self.PIKA_DEVICE_MAP:  # 在全局变量里查看是否已经被其它对象连接
                 self._pika_sense = self.PIKA_DEVICE_MAP[self._pika_sense_port]
                 return self._pika_sense
             from pika.sense import Sense
@@ -162,25 +162,25 @@ class PikaDevice(object):
             # 配置Vive Tracker（可选）
             # sense.set_vive_tracker_config(config_path='path/to/config', lh_config='lighthouse_config')
 
-            tracker = self._pika_sense.get_vive_tracker()
+            tracker = self._pika_sense.get_vive_tracker()  # SDK(agx-pypika) 中定义了Sense类
             if not tracker:
                 logger.error('Vive Tracker初始化失败')
-                self._pika_sense.disconnect()
+                self._pika_sense.disconnect()  # 没有连接上Vive Tracker就断开Sense连接
                 exit(1)
             logger.info('Vive Tracker初始化成功')
             time.sleep(2)
-
-            if self.pika_tracker_device:
+            # 在 Pika Sense 已经连接之后，确定最终使用哪一个 Vive Tracker，并确保它能正常提供位姿。
+            if self.pika_tracker_device:  # 该参数表示配置文件内的用户指定的tracker标号
                 logger.info('使用配置指定的Tracker设备: {}'.format(self.pika_tracker_device))
-                devices = []
-                valid_pose = None
+                devices = []  # 记录发现的Vive Tracker设备
+                valid_pose = None  # 保存找到的有效位姿
                 expired_time = time.monotonic() + 15.0
                 while time.monotonic() < expired_time:
-                    devices = self._pika_sense.get_tracker_devices()
+                    devices = self._pika_sense.get_tracker_devices()  # 获取设备
                     pose = self._pika_sense.get_pose(self.pika_tracker_device)
                     if pose is not None:
                         values = [*pose.position, *pose.rotation]
-                        if values and all(math.isfinite(float(v)) for v in values):
+                        if values and all(math.isfinite(float(v)) for v in values):  # ？？
                             valid_pose = pose
                             break
                     time.sleep(0.25)
@@ -190,8 +190,8 @@ class PikaDevice(object):
                         self.pika_tracker_device,
                         devices,
                     )
-                    self.PIKA_DEVICE_MAP.pop(self._pika_sense_port, None)
-                    self._pika_sense.disconnect()
+                    self.PIKA_DEVICE_MAP.pop(self._pika_sense_port, None)  # 指定标号的tracker标号无法被读取
+                    self._pika_sense.disconnect()  # 之后就断开Sense连接 报错
                     self._pika_sense = None
                     raise RuntimeError(
                         'Configured Pika tracker {} is unavailable or stale'.format(
@@ -202,7 +202,7 @@ class PikaDevice(object):
                 devices = []
                 expired_time = time.monotonic() + 15.0
                 while time.monotonic() < expired_time:
-                    devices = self._pika_sense.get_tracker_devices()
+                    devices = self._pika_sense.get_tracker_devices()  # 获取的是短编号
                     tracker_devices = [device for device in devices if not device.startswith('LH')]
                     if tracker_devices:
                         break
@@ -218,12 +218,12 @@ class PikaDevice(object):
                     logger.error('No Pika tracker found; only lighthouse devices were detected: {}'.format(devices))
                     self._pika_sense.disconnect()
                     exit(1)
-                for device in tracker_devices:
+                for device in tracker_devices:  # 找到第一个符合条件的设备
                     if device.startswith('WM'):
                         self.pika_tracker_device = device
                         break
                 else:
-                    self.pika_tracker_device = tracker_devices[0]
+                    self.pika_tracker_device = tracker_devices[0]  # 使用devices的第一个
             logger.info('开始跟踪设备: {}\n'.format(self.pika_tracker_device))
         return self._pika_sense
 
@@ -249,15 +249,15 @@ class PikaDevice(object):
 
 
 if __name__ == '__main__':
-    pika_device1 = PikaDevice(1)
-    pika_device1.pika_sense
-    pika_device1.pika_gripper
+    pika_device1 = PikaDevice(1)  # 预设为Sense设备
+    pika_device1.pika_sense  # 第一次调用时创建
+    pika_device1.pika_gripper  # 实际上会失败
     time.sleep(3)
 
     # input('=================')
 
     pika_device2 = PikaDevice(2)
-    pika_device2.pika_sense
+    pika_device2.pika_sense  # 实际上会失败
     pika_device2.pika_gripper
 
     input('=================')

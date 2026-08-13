@@ -75,6 +75,31 @@ def rotation_matrix_to_rotvec(rotation) -> np.ndarray:
     return q[:3] * (angle / vector_norm)
 
 
+def rotvec_to_rotation_matrix(rotation_vector) -> np.ndarray:
+    """Convert an axis-angle rotation vector to a 3x3 rotation matrix."""
+    rotvec = np.asarray(rotation_vector, dtype=np.float64)
+    if rotvec.shape != (3,) or not np.all(np.isfinite(rotvec)):
+        raise ValueError("rotation vector must contain three finite values")
+    angle = float(np.linalg.norm(rotvec))
+    if angle < 1e-12:
+        return np.eye(3, dtype=np.float64)
+    axis = rotvec / angle
+    x, y, z = axis
+    skew = np.array([[0.0, -z, y], [z, 0.0, -x], [-y, x, 0.0]], dtype=np.float64)
+    return np.eye(3, dtype=np.float64) + np.sin(angle) * skew + (1.0 - np.cos(angle)) * (skew @ skew)
+
+
+def relative_rotvec_pose_to_absolute(reference_pose, relative_xyz_rotvec) -> np.ndarray:
+    """Apply a relative xyz+rotation-vector transform to an absolute pose."""
+    relative_pose_value = np.asarray(relative_xyz_rotvec, dtype=np.float64)
+    if relative_pose_value.shape != (6,) or not np.all(np.isfinite(relative_pose_value)):
+        raise ValueError("relative pose must contain six finite xyz+rotvec values")
+    relative_transform = np.eye(4, dtype=np.float64)
+    relative_transform[:3, :3] = rotvec_to_rotation_matrix(relative_pose_value[3:])
+    relative_transform[:3, 3] = relative_pose_value[:3]
+    return matrix_to_pose(pose_to_matrix(reference_pose) @ relative_transform)
+
+
 def relative_pose(reference_pose, target_pose, representation="xyz_rotvec") -> np.ndarray:
     relative = np.linalg.inv(pose_to_matrix(reference_pose)) @ pose_to_matrix(target_pose)
     if representation == "xyz_xyzw":

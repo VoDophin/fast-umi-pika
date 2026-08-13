@@ -27,7 +27,7 @@ class PikaDirectRobot(Robot):
     def __init__(self, config: PikaDirectRobotConfig) -> None:
         super().__init__(config)
         self.config = config
-        self.cameras = make_cameras_from_configs(config.cameras)
+        self.cameras = make_cameras_from_configs(config.cameras) ##
         self._device: PikaDevice | None = None
         self._sense = None
         self._is_connected = False
@@ -81,10 +81,10 @@ class PikaDirectRobot(Robot):
         self._device = PikaDevice(
             1,
             pika_sense_port=self.config.port,
-            pika_tracker_device=self.config.tracker_device_id,
-        )
+            pika_tracker_device=self.config.tracker_device_id,  # 为什么使用的是id？ tracker设备后边不用了么
+        )  # 根据port 和 tracker_device_id 创建一个PikaDevice对象
         self._sense = self._device.pika_sense
-        for camera in self.cameras.values():
+        for camera in self.cameras.values():  # 连接所有的相机 camera 在创建类对象是进行识别
             camera.connect()
         self._is_connected = True
 
@@ -94,30 +94,32 @@ class PikaDirectRobot(Robot):
     def configure(self) -> None:
         return None
 
-    def _normalize_gripper(self, width_mm: float) -> float:
+    def _normalize_gripper(self, width_mm: float) -> float:  # 夹爪的距离范围在 config中设置
         span = self.config.gripper_open_width_mm - self.config.gripper_closed_width_mm
         return float(np.clip((width_mm - self.config.gripper_closed_width_mm) / span, 0.0, 1.0))
 
-    def get_observation(self) -> dict[str, Any]:
+    def get_observation(self) -> dict[str, Any]:  # 采一帧完整数据
         if not self._is_connected or self._sense is None:
             raise DeviceNotConnectedError("PikaDirectRobot must be connected before reading")
         pose = self._sense.get_pose(self._device.pika_tracker_device)
         if pose is None:
-            self.invalid_frame_count += 1
+            self.invalid_frame_count += 1  # 帧标记为无效
             raise InvalidPikaFrame("Pika tracker returned no pose")
         tracker_pose = np.asarray((*pose.position, *pose.rotation), dtype=np.float64)
         if tracker_pose.shape != (7,) or not np.all(np.isfinite(tracker_pose)):
             self.invalid_frame_count += 1
             raise InvalidPikaFrame("Pika tracker returned an invalid pose")
         tracker_pose[3:] = normalize_quaternion(tracker_pose[3:])
-        tcp_pose = compose_pose(tracker_pose, self._tracker_to_tcp)
+
+        tcp_pose = compose_pose(tracker_pose, self._tracker_to_tcp) # 实际上无需修正即可
+
         width = self._sense.get_gripper_distance()
         if width is None or not np.isfinite(float(width)):
             self.invalid_frame_count += 1
             raise InvalidPikaFrame("Pika gripper returned an invalid width")
         width = float(width)
         gripper = self._normalize_gripper(width)
-        timestamp = time.monotonic()
+        timestamp = time.monotonic() # 读完数据的时间作为时间戳 同时因为是顺序读取的 真实时间戳并不能完全对齐
         self._sample_id += 1
         observation: dict[str, Any] = {
             **{f"tracker.{name}": float(value) for name, value in zip(
@@ -126,8 +128,8 @@ class PikaDirectRobot(Robot):
             **{f"tcp.{name}": float(value) for name, value in zip(
                 ("x", "y", "z", "qx", "qy", "qz", "qw"), tcp_pose, strict=True
             )},
-            "gripper": gripper,
-            "gripper_width_mm": width,
+            "gripper": gripper,  # 归一化数据
+            "gripper_width_mm": width,  # 原始数据
             "sensor_timestamp": timestamp,
             "sample_id": float(self._sample_id),
         }
@@ -139,14 +141,14 @@ class PikaDirectRobot(Robot):
             observation[key] = image
         names = ("x", "y", "z", "qx", "qy", "qz", "qw")
         self._last_action = {f"tcp.{name}": float(value) for name, value in zip(names, tcp_pose, strict=True)}
-        self._last_action["gripper"] = gripper
+        self._last_action["gripper"] = gripper  # _last_action是当前的tcp_pose和gripper状态
         return observation
 
     def action_from_observation(self, observation: dict[str, Any]) -> dict[str, float]:
         """Return the cached action paired with the most recent atomic sample."""
         if self._last_action is None:
             raise RuntimeError("get_observation() must be called before action_from_observation()")
-        return self._last_action.copy()
+        return self._last_action.copy()  # observation和配对的action是同一帧数据的tcp_pose和gripper状态 直接返回即可
 
     def send_action(self, action: dict[str, Any]) -> dict[str, Any]:
         """Compatibility no-op: this acquisition device never controls hardware."""

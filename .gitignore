@@ -1,10 +1,14 @@
 __pycache__/
 *.py[cod]
+.idea/
+.phantom-comments/
 .pytest_cache/
 .ruff_cache/
 .venv/
+node_modules/
 data/
 outputs/
 dist/
 build/
 *.egg-info/
+build成果统计表.mjs

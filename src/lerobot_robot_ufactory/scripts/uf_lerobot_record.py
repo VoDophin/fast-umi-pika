@@ -1,6 +1,6 @@
 """Focused LeRobot recorder for the read-only Pika direct Robot."""
 
-from __future__ import annotations
+from __future__ import annotations  # 解决类定义中使用类的情况
 
 import argparse
 import time
@@ -30,7 +30,7 @@ class DatasetConfig:
     push_to_hub: bool = False
 
 
-@dataclass
+@dataclass  # 自动帮你生成“存数据用的类”里那些重复的样板代码。 而你只需要定义类型名和类型以及默认值
 class RecordConfig:
     robot: PikaDirectRobotConfig
     dataset: DatasetConfig
@@ -42,12 +42,12 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
         action=robot.action_features, observation=robot.observation_features
     )
     dataset = LeRobotDataset.create(
-        cfg.dataset.repo_id,
+        cfg.dataset.repo_id,  # 数据集名称
         cfg.dataset.fps,
-        root=cfg.dataset.root,
-        robot_type=robot.name,
-        features=features,
-        use_videos=cfg.dataset.video,
+        root=cfg.dataset.root,  # 实际存储位置
+        robot_type=robot.name,  # 记录是什么设备产生的
+        features=features,  # 一帧中包含什么字段 是什么类型 什么shape 特征名到metadata的映射
+        use_videos=cfg.dataset.video, # true/false 是否保存为视频 还是图片
     )
     robot.connect()
     try:
@@ -57,18 +57,19 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
             while time.monotonic() < deadline:
                 started = time.monotonic()
                 try:
-                    observation = robot.get_observation()
+                    observation = robot.get_observation()  ##
                 except InvalidPikaFrame as exc:
                     print(f"Drop invalid Pika frame: {exc}")
                     continue
-                action = robot.action_from_observation(observation)
+                action = robot.action_from_observation(observation)  ## 将当前的observation转化action
                 dataset.add_frame(
                     {
                         **build_dataset_frame(dataset.features, observation, prefix=OBS_STR),
                         **build_dataset_frame(dataset.features, action, prefix=ACTION),
                         "task": cfg.dataset.single_task,
                     }
-                )
+                )  # 存入帧数据
+                # 注意此处的帧率控制机制还比较简单
                 time.sleep(max(0.0, 1 / cfg.dataset.fps - (time.monotonic() - started)))
             dataset.save_episode()
     finally:

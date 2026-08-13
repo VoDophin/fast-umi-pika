@@ -27,6 +27,6 @@ dataset:
   single_task: REPLACE_TASK_DESCRIPTION
   fps: 30
   episode_time_s: 30
-  reset_time_s: 10
   num_episodes: 50
+  video: true
   push_to_hub: false
