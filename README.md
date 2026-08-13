@@ -193,7 +193,7 @@ dataset:
 uf-lerobot-record --config_path=config/pika/pika_direct_record.yaml
 ```
 
-每个 episode 开始前按 Enter，达到 `episode_time_s` 后调用 LeRobot 的 `save_episode()`。无效 Tracker、夹爪或图像帧会被丢弃。
+每个 episode 开始前按一次 Enter。采集过程中再次按 Enter，可以提前结束当前 episode：已有有效帧时会调用 `save_episode()`，没有有效帧时不会保存空 episode。之后程序继续等待你按 Enter 开始下一个 episode；达到配置的 `num_episodes` 后才结束整个采集并断开设备。未提前结束时，episode 达到 `episode_time_s` 后自动保存。无效 Tracker、夹爪或图像帧会被丢弃。
 
 Raw `observation.state` 为 18 维，字段顺序固定为：
 

@@ -3,6 +3,9 @@
 from __future__ import annotations  # 解决类定义中使用类的情况
 
 import argparse
+import os
+import select
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +39,31 @@ class RecordConfig:
     dataset: DatasetConfig
 
 
+def _enter_pressed() -> bool:
+    """Return immediately and consume one pending Enter key press.
+
+    POSIX terminals become readable after a complete line is entered. Windows
+    terminals expose individual key presses through msvcrt. Redirected stdin
+    is ignored so a closed pipe cannot terminate recording unexpectedly.
+    """
+    if not sys.stdin.isatty():
+        return False
+    if os.name == "nt":
+        import msvcrt
+
+        pressed = False
+        while msvcrt.kbhit():
+            key = msvcrt.getwch()
+            if key in ("\r", "\n"):
+                pressed = True
+        return pressed
+    readable, _, _ = select.select([sys.stdin], [], [], 0)
+    if not readable:
+        return False
+    sys.stdin.readline()
+    return True
+
+
 def record(cfg: RecordConfig) -> LeRobotDataset:
     robot = PikaDirectRobot(cfg.robot)
     features = create_initial_features(
@@ -53,8 +81,13 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
     try:
         for episode in range(cfg.dataset.num_episodes):
             input(f"Press Enter to record episode {episode} >>> ")
+            print("Recording... Press Enter again to finish and save this episode early.")
             deadline = time.monotonic() + cfg.dataset.episode_time_s
+            recorded_frames = 0
             while time.monotonic() < deadline:
+                if _enter_pressed():
+                    print(f"Finishing episode {episode} early.")
+                    break
                 started = time.monotonic()
                 try:
                     observation = robot.get_observation()  ##
@@ -69,9 +102,14 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                         "task": cfg.dataset.single_task,
                     }
                 )  # 存入帧数据
+                recorded_frames += 1
                 # 注意此处的帧率控制机制还比较简单
                 time.sleep(max(0.0, 1 / cfg.dataset.fps - (time.monotonic() - started)))
-            dataset.save_episode()
+            if recorded_frames:
+                dataset.save_episode()
+                print(f"Saved episode {episode} with {recorded_frames} frames.")
+            else:
+                print(f"Episode {episode} contains no valid frames and was not saved.")
     finally:
         robot.disconnect()
     if cfg.dataset.push_to_hub:
