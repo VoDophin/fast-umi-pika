@@ -10,8 +10,9 @@ ROOT = Path(__file__).parents[1]
 def _load_recorder():
     module_names = (
         "draccus", "lerobot",
-        "lerobot.datasets", "lerobot.datasets.lerobot_dataset", "lerobot.datasets.utils",
-        "lerobot.scripts", "lerobot.scripts.lerobot_record", "lerobot.utils",
+        "lerobot.datasets", "lerobot.datasets.lerobot_dataset",
+        "lerobot.datasets.pipeline_features", "lerobot.datasets.utils",
+        "lerobot.processor", "lerobot.utils",
         "lerobot.utils.constants", "lerobot_robot_ufactory",
         "lerobot_robot_ufactory.pika_direct", "lerobot_robot_ufactory.pika_direct.robot",
         "uf_lerobot_record_test",
@@ -22,13 +23,26 @@ def _load_recorder():
         draccus.parse = lambda *args, **kwargs: None
         sys.modules["draccus"] = draccus
 
-        for name in module_names[1:10]:
+        for name in module_names[1:9]:
             module = types.ModuleType(name)
             module.__path__ = []
             sys.modules[name] = module
         sys.modules["lerobot.datasets.lerobot_dataset"].LeRobotDataset = object
         sys.modules["lerobot.datasets.utils"].build_dataset_frame = lambda *args, **kwargs: {}
-        sys.modules["lerobot.scripts.lerobot_record"].create_initial_features = lambda **kwargs: {}
+        sys.modules["lerobot.datasets.utils"].combine_feature_dicts = (
+            lambda *feature_dicts: {
+                key: value for feature_dict in feature_dicts for key, value in feature_dict.items()
+            }
+        )
+        sys.modules["lerobot.datasets.pipeline_features"].create_initial_features = (
+            lambda **kwargs: kwargs
+        )
+        sys.modules["lerobot.datasets.pipeline_features"].aggregate_pipeline_dataset_features = (
+            lambda pipeline, initial_features, use_videos: initial_features
+        )
+        sys.modules["lerobot.processor"].make_default_processors = (
+            lambda: (object(), object(), object())
+        )
         sys.modules["lerobot.utils.constants"].ACTION = "action"
         sys.modules["lerobot.utils.constants"].OBS_STR = "observation"
 
@@ -112,3 +126,37 @@ def test_enter_finishes_current_episode_and_continues_to_next(monkeypatch):
     assert result is dataset
     assert len(dataset.frames) == 2
     assert dataset.saved == 2
+
+
+def test_dataset_features_are_aggregated_before_dataset_creation():
+    recorder = _load_recorder()
+
+    class Robot:
+        action_features = {"tcp": object()}
+        observation_features = {"camera": object()}
+
+    calls = []
+    recorder.make_default_processors = lambda: ("action_pipeline", "unused", "observation_pipeline")
+    recorder.create_initial_features = lambda **kwargs: kwargs
+
+    def aggregate(pipeline, initial_features, use_videos):
+        calls.append((pipeline, initial_features, use_videos))
+        prefix = "action" if "action" in initial_features else "observation"
+        return {prefix: {"dtype": "video" if use_videos else "image"}}
+
+    recorder.aggregate_pipeline_dataset_features = aggregate
+    recorder.combine_feature_dicts = lambda *items: {
+        key: value for item in items for key, value in item.items()
+    }
+
+    features = recorder._make_dataset_features(Robot(), use_videos=True)
+
+    assert features == {
+        "action": {"dtype": "video"},
+        "observation": {"dtype": "video"},
+    }
+    assert calls == [
+        ("action_pipeline", {"action": Robot.action_features}, True),
+        ("observation_pipeline", {"observation": Robot.observation_features}, True),
+    ]
+    assert all("dtype" in feature for feature in features.values())

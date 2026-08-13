@@ -12,8 +12,12 @@ from pathlib import Path
 
 import draccus
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.datasets.utils import build_dataset_frame
-from lerobot.scripts.lerobot_record import create_initial_features
+from lerobot.datasets.pipeline_features import (
+    aggregate_pipeline_dataset_features,
+    create_initial_features,
+)
+from lerobot.datasets.utils import build_dataset_frame, combine_feature_dicts
+from lerobot.processor import make_default_processors
 from lerobot.utils.constants import ACTION, OBS_STR
 
 import lerobot_robot_ufactory  # noqa: F401
@@ -37,6 +41,23 @@ class DatasetConfig:
 class RecordConfig:
     robot: PikaDirectRobotConfig
     dataset: DatasetConfig
+
+
+def _make_dataset_features(robot: PikaDirectRobot, use_videos: bool) -> dict:
+    """Convert the robot's hardware features into LeRobot dataset metadata."""
+    teleop_action_processor, _, robot_observation_processor = make_default_processors()
+    return combine_feature_dicts(
+        aggregate_pipeline_dataset_features(
+            pipeline=teleop_action_processor,
+            initial_features=create_initial_features(action=robot.action_features),
+            use_videos=use_videos,
+        ),
+        aggregate_pipeline_dataset_features(
+            pipeline=robot_observation_processor,
+            initial_features=create_initial_features(observation=robot.observation_features),
+            use_videos=use_videos,
+        ),
+    )
 
 
 def _enter_pressed() -> bool:
@@ -66,9 +87,7 @@ def _enter_pressed() -> bool:
 
 def record(cfg: RecordConfig) -> LeRobotDataset:
     robot = PikaDirectRobot(cfg.robot)
-    features = create_initial_features(
-        action=robot.action_features, observation=robot.observation_features
-    )
+    features = _make_dataset_features(robot, cfg.dataset.video)
     dataset = LeRobotDataset.create(
         cfg.dataset.repo_id,  # 数据集名称
         cfg.dataset.fps,
