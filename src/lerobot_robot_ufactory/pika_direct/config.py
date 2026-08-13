@@ -3,6 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from lerobot.cameras import CameraConfig
+# Importing the concrete config runs its CameraConfig registration decorator.
+# Keep this import here (instead of the recorder entry point) so every parser of
+# PikaDirectRobotConfig understands `type: opencv` before Draccus decodes YAML.
+from lerobot.cameras.opencv.configuration_opencv import (
+    OpenCVCameraConfig as _OpenCVCameraConfig,  # noqa: F401
+)
 from lerobot.robots import RobotConfig
 
 
