@@ -3,6 +3,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).parents[1]
 
@@ -71,8 +73,9 @@ def _load_recorder():
                 sys.modules[name] = module
 
 
-def test_enter_finishes_current_episode_and_continues_to_next(monkeypatch):
+def test_enter_finishes_current_episode_and_continues_to_next(monkeypatch, tmp_path):
     recorder = _load_recorder()
+    events = []
 
     class Robot:
         name = "pika_direct"
@@ -83,7 +86,7 @@ def test_enter_finishes_current_episode_and_continues_to_next(monkeypatch):
             self.disconnected = False
 
         def connect(self):
-            pass
+            events.append("robot_connected")
 
         def get_observation(self):
             return {"value": 1}
@@ -109,7 +112,12 @@ def test_enter_finishes_current_episode_and_continues_to_next(monkeypatch):
 
     dataset = Dataset()
     recorder.PikaDirectRobot = Robot
-    recorder.LeRobotDataset = types.SimpleNamespace(create=lambda *args, **kwargs: dataset)
+
+    def create_dataset(*args, **kwargs):
+        events.append("dataset_created")
+        return dataset
+
+    recorder.LeRobotDataset = types.SimpleNamespace(create=create_dataset)
     recorder.build_dataset_frame = lambda *args, **kwargs: {"value": 1}
     # Each episode records one frame, then receives Enter on the next loop.
     presses = iter((False, True, False, True))
@@ -119,13 +127,16 @@ def test_enter_finishes_current_episode_and_continues_to_next(monkeypatch):
 
     cfg = recorder.RecordConfig(
         robot=object(),
-        dataset=recorder.DatasetConfig("root", "repo", "task", num_episodes=2),
+        dataset=recorder.DatasetConfig(
+            str(tmp_path / "dataset"), "repo", "task", num_episodes=2
+        ),
     )
     result = recorder.record(cfg)
 
     assert result is dataset
     assert len(dataset.frames) == 2
     assert dataset.saved == 2
+    assert events[:2] == ["robot_connected", "dataset_created"]
 
 
 def test_dataset_features_are_aggregated_before_dataset_creation():
@@ -160,3 +171,37 @@ def test_dataset_features_are_aggregated_before_dataset_creation():
         ("observation_pipeline", {"observation": Robot.observation_features}, True),
     ]
     assert all("dtype" in feature for feature in features.values())
+
+
+def test_device_connection_failure_does_not_create_dataset(monkeypatch, tmp_path):
+    recorder = _load_recorder()
+    dataset_created = False
+
+    class Robot:
+        name = "pika_direct"
+        action_features = {}
+        observation_features = {}
+
+        def __init__(self, config):
+            pass
+
+        def connect(self):
+            raise ConnectionError("second camera unavailable")
+
+    def create_dataset(*args, **kwargs):
+        nonlocal dataset_created
+        dataset_created = True
+
+    recorder.PikaDirectRobot = Robot
+    recorder.LeRobotDataset = types.SimpleNamespace(create=create_dataset)
+    dataset_root = tmp_path / "dataset"
+    cfg = recorder.RecordConfig(
+        robot=object(),
+        dataset=recorder.DatasetConfig(str(dataset_root), "repo", "task"),
+    )
+
+    with pytest.raises(ConnectionError, match="second camera unavailable"):
+        recorder.record(cfg)
+
+    assert not dataset_created
+    assert not dataset_root.exists()

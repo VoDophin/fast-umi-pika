@@ -88,16 +88,24 @@ def _enter_pressed() -> bool:
 def record(cfg: RecordConfig) -> LeRobotDataset:
     robot = PikaDirectRobot(cfg.robot)
     features = _make_dataset_features(robot, cfg.dataset.video)
-    dataset = LeRobotDataset.create(
-        cfg.dataset.repo_id,  # 数据集名称
-        cfg.dataset.fps,
-        root=cfg.dataset.root,  # 实际存储位置
-        robot_type=robot.name,  # 记录是什么设备产生的
-        features=features,  # 一帧中包含什么字段 是什么类型 什么shape 特征名到metadata的映射
-        use_videos=cfg.dataset.video, # true/false 是否保存为视频 还是图片
-    )
+    dataset_root = Path(cfg.dataset.root).expanduser()
+    if dataset_root.exists():
+        raise FileExistsError(
+            f"Dataset root already exists: {dataset_root}. "
+            "Choose a new dataset.root or remove the old incomplete dataset explicitly."
+        )
     robot.connect()
     try:
+        # Create metadata only after every configured device has connected. A
+        # camera startup failure must not leave an empty dataset directory.
+        dataset = LeRobotDataset.create(
+            cfg.dataset.repo_id,
+            cfg.dataset.fps,
+            root=cfg.dataset.root,
+            robot_type=robot.name,
+            features=features,
+            use_videos=cfg.dataset.video,
+        )
         for episode in range(cfg.dataset.num_episodes):
             input(f"Press Enter to record episode {episode} >>> ")
             print("Recording... Press Enter again to finish and save this episode early.")
@@ -129,11 +137,11 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                 print(f"Saved episode {episode} with {recorded_frames} frames.")
             else:
                 print(f"Episode {episode} contains no valid frames and was not saved.")
+        if cfg.dataset.push_to_hub:
+            dataset.push_to_hub(private=False)
+        return dataset
     finally:
         robot.disconnect()
-    if cfg.dataset.push_to_hub:
-        dataset.push_to_hub(private=False)
-    return dataset
 
 
 def main() -> None:

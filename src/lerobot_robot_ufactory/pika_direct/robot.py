@@ -78,15 +78,22 @@ class PikaDirectRobot(Robot):
     def connect(self, calibrate: bool = True) -> None:
         if self._is_connected:
             return
-        self._device = PikaDevice(
-            1,
-            pika_sense_port=self.config.port,
-            pika_tracker_device=self.config.tracker_device_id,  # 为什么使用的是id？ tracker设备后边不用了么
-        )  # 根据port 和 tracker_device_id 创建一个PikaDevice对象
-        self._sense = self._device.pika_sense
-        for camera in self.cameras.values():  # 连接所有的相机 camera 在创建类对象是进行识别
-            camera.connect()
-        self._is_connected = True
+        try:
+            self._device = PikaDevice(
+                1,
+                pika_sense_port=self.config.port,
+                pika_tracker_device=self.config.tracker_device_id,
+            )
+            self._sense = self._device.pika_sense
+            for camera in self.cameras.values():
+                camera.connect()
+            self._is_connected = True
+        except BaseException:
+            # A multi-camera startup can fail after earlier devices connected.
+            # Release every successfully opened resource before propagating the
+            # original error so the next recording attempt is not blocked.
+            self.disconnect()
+            raise
 
     def calibrate(self) -> None:
         return None
@@ -156,8 +163,11 @@ class PikaDirectRobot(Robot):
 
     def disconnect(self) -> None:
         for camera in self.cameras.values():
-            camera.disconnect()
-        if self._sense is not None:
+            if camera.is_connected:
+                camera.disconnect()
+        if self._device is not None:
+            self._device.disconnect()
+        elif self._sense is not None:
             self._sense.disconnect()
         self._sense = None
         self._device = None

@@ -136,10 +136,24 @@ class PikaDevice(object):
     #     return cls._instance
 
     def __del__(self):
+        try:
+            self.disconnect()
+        except Exception:
+            # Destructors must not mask the original startup/shutdown error.
+            pass
+
+    def disconnect(self):
+        """Release connected Pika resources and remove stale shared entries."""
         if self._pika_sense:
+            if self.PIKA_DEVICE_MAP.get(self._pika_sense_port) is self._pika_sense:
+                self.PIKA_DEVICE_MAP.pop(self._pika_sense_port, None)
             self._pika_sense.disconnect()
+            self._pika_sense = None
         if self._pika_gripper:
+            if self.PIKA_DEVICE_MAP.get(self._pika_gripper_port) is self._pika_gripper:
+                self.PIKA_DEVICE_MAP.pop(self._pika_gripper_port, None)
             self._pika_gripper.disconnect()
+            self._pika_gripper = None
 
     @property  # 按照变量的方式调用方法 device.pika_sense
     def pika_sense(self):  # 第一次访问时才真正连接 Sense
@@ -190,9 +204,7 @@ class PikaDevice(object):
                         self.pika_tracker_device,
                         devices,
                     )
-                    self.PIKA_DEVICE_MAP.pop(self._pika_sense_port, None)  # 指定标号的tracker标号无法被读取
-                    self._pika_sense.disconnect()  # 之后就断开Sense连接 报错
-                    self._pika_sense = None
+                    self.disconnect()
                     raise RuntimeError(
                         'Configured Pika tracker {} is unavailable or stale'.format(
                             self.pika_tracker_device
