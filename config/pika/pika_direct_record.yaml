@@ -4,12 +4,12 @@ robot:
 #  type: uf::pika_direct
   id: pika_handheld
   port: /dev/ttyUSB0
-  tracker_device_id: T20
+  tracker_device_id: T21
   tracker_to_tcp:
     translation_m: [0.0, 0.0, 0.0]
     rotation_quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
-  gripper_closed_width_mm: 0.4
-  gripper_open_width_mm: 98.1
+  gripper_closed_width_mm: -2.257
+  gripper_open_width_mm: 98.558
   cameras:
     hand_rgb:                   # 手部非鱼眼 RGB（RealSense 405）
       type: opencv
@@ -19,7 +19,7 @@ robot:
       fps: 30
     third_person:               # 固定第三视角（RealSense 435i）
       type: opencv
-      index_or_path: "/dev/v4l/by-id/usb-Intel_R__RealSense_TM__Depth_Camera_435i_Intel_R__RealSense_TM__Depth_Camera_435i-video-index0"
+      index_or_path: "/dev/v4l/by-id/usb-Intel_R__RealSense_TM__Depth_Camera_435i_Intel_R__RealSense_TM__Depth_Camera_435i_337543060532-video-index0"
       width: 640
       height: 480
       fps: 30

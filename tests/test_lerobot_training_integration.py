@@ -10,7 +10,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
-import pytest
+import pytest  # 直接将tests目录下的文件都标记为测试文件，pytest会自动发现并运行这些测试
 
 pytest.importorskip("lerobot")
 
