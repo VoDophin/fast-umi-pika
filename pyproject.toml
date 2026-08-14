@@ -19,6 +19,7 @@ dependencies = [
 uf-lerobot-record = "lerobot_robot_ufactory.scripts.uf_lerobot_record:main"
 uf-lerobot-train = "lerobot_robot_ufactory.scripts.uf_lerobot_train:main"
 uf-pika-inspect = "lerobot_robot_ufactory.pika_direct.inspection:main"
+uf-find-rgb-cameras = "lerobot_robot_ufactory.pika_direct.rgb_camera_probe:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.8"]

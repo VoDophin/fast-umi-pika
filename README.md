@@ -110,6 +110,7 @@ src/lerobot_robot_ufactory/
 │   ├── config.py                    # PikaDirectRobot 配置
 │   ├── geometry.py                  # 位姿与旋转变换
 │   ├── inspection.py                # 数据集检查
+│   ├── rgb_camera_probe.py           # RGB节点、by-id与单帧检测
 │   ├── robot.py                     # 只读 LeRobot Robot 适配器
 │   └── umi_relative.py              # ACT/Diffusion 数据 wrapper
 └── scripts/
@@ -186,6 +187,39 @@ dataset:
 - `tracker_to_tcp` 是实际标定值；
 - 相机路径、分辨率和 FPS 可正常打开；
 - 夹爪开闭宽度与实际设备一致。
+
+### 自动查找 RGB 相机节点
+
+RealSense 会同时暴露彩色、深度、红外和 metadata 等多个
+`/dev/video*` 节点。运行下面的命令扫描全部节点、反查 by-id/by-path，
+并为每个 RGB 候选保存一张 JPEG：
+
+该工具依赖 Ubuntu 软件包 `v4l-utils`（提供 `v4l2-ctl`）。
+
+```bash
+uf-find-rgb-cameras
+```
+
+也可以指定检测分辨率、帧率和输出目录：
+
+```bash
+uf-find-rgb-cameras \
+  --width 640 \
+  --height 480 \
+  --fps 30 \
+  --output-dir outputs/rgb_camera_probe
+```
+
+每次运行会创建一个带时间戳的子目录，其中包含：
+
+- 每个可读取 RGB 候选节点的一张 JPEG；
+- `manifest.json`，记录 `/dev/videoN`、设备序列号、支持的 FOURCC、
+  对应的 by-id/by-path 和推荐配置路径；
+- 失败节点的错误原因。
+
+人工查看 JPEG，确定第一人称与第三人称画面后，把对应条目的
+`recommended_path` 写入 `pika_direct_record.yaml`。工具优先推荐 by-id；
+节点没有 by-id 时退回 by-path，最后才使用不稳定的 `/dev/videoN`。
 
 ## 采集 Raw 数据
 
