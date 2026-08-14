@@ -61,3 +61,23 @@ def test_video_nodes_sort_numerically():
         Path("/dev/video4"),
         Path("/dev/video10"),
     ]
+
+
+def test_exhaustive_mode_attempts_nonstandard_formats_but_skips_metadata():
+    depth = {"formats": ["Z16"], "formats_error": None, "candidate_rank": 0}
+    metadata = {"formats": [], "formats_error": None, "candidate_rank": 0}
+    query_failed = {"formats": [], "formats_error": "ioctl failed", "candidate_rank": 0}
+
+    assert probe.should_attempt_capture(depth, exhaustive=True)
+    assert not probe.should_attempt_capture(metadata, exhaustive=True)
+    assert probe.should_attempt_capture(query_failed, exhaustive=True)
+    assert not probe.should_attempt_capture(depth, exhaustive=False)
+
+
+def test_capture_profiles_try_device_default_before_forcing_fourcc():
+    profiles = probe.capture_profiles(["YUYV", "MJPG"])
+
+    assert profiles[0] == {"name": "device-default", "configure": False, "fourcc": None}
+    assert profiles[1]["name"] == "requested-size-default-fourcc"
+    assert [item["fourcc"] for item in profiles].count("MJPG") == 1
+    assert [item["fourcc"] for item in profiles].count("YUYV") == 1

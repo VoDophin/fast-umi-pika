@@ -191,10 +191,12 @@ dataset:
 ### 自动查找 RGB 相机节点
 
 RealSense 会同时暴露彩色、深度、红外和 metadata 等多个
-`/dev/video*` 节点。运行下面的命令扫描全部节点、反查 by-id/by-path，
-并为每个 RGB 候选保存一张 JPEG：
+`/dev/video*` 节点。运行下面的命令穷举带视频格式的节点、反查
+by-id/by-path，并为每个可读取节点保存一张 JPEG：
 
 该工具依赖 Ubuntu 软件包 `v4l-utils`（提供 `v4l2-ctl`）。
+运行前应关闭采集程序、RealSense Viewer 和其他占用相机的进程；如果报告
+显示 `open failed`，可用 `sudo fuser -v /dev/videoN` 检查占用者。
 
 ```bash
 uf-find-rgb-cameras
@@ -216,6 +218,14 @@ uf-find-rgb-cameras \
 - `manifest.json`，记录 `/dev/videoN`、设备序列号、支持的 FOURCC、
   对应的 by-id/by-path 和推荐配置路径；
 - 失败节点的错误原因。
+
+默认先使用设备自身的默认模式抓帧；失败后才尝试指定的分辨率、帧率
+和各个 FOURCC。这会保留更多深度、红外或非标准格式图片，目的是避免
+漏掉驱动报告方式特殊的 RGB 节点。如果只想检测典型 RGB FOURCC，可加：
+
+```bash
+uf-find-rgb-cameras --typical-rgb-only
+```
 
 人工查看 JPEG，确定第一人称与第三人称画面后，把对应条目的
 `recommended_path` 写入 `pika_direct_record.yaml`。工具优先推荐 by-id；

@@ -122,6 +122,28 @@ def _safe_filename(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("_") or "camera"
 
 
+def should_attempt_capture(candidate: dict[str, Any], exhaustive: bool) -> bool:
+    if exhaustive:
+        # Empty format output without an error is normally a metadata-only node.
+        return bool(candidate["formats"]) or candidate["formats_error"] is not None
+    return candidate["candidate_rank"] > 0
+
+
+def capture_profiles(formats: list[str]) -> list[dict[str, Any]]:
+    """Try the device default first, then increasingly explicit profiles."""
+    profiles: list[dict[str, Any]] = [
+        {"name": "device-default", "configure": False, "fourcc": None},
+        {"name": "requested-size-default-fourcc", "configure": True, "fourcc": None},
+    ]
+    for fourcc in (*PREFERRED_RGB_FORMATS, *OTHER_COLOR_FORMATS, *formats):
+        if len(fourcc) != 4 or any(item["fourcc"] == fourcc for item in profiles):
+            continue
+        profiles.append(
+            {"name": f"requested-size-{fourcc}", "configure": True, "fourcc": fourcc}
+        )
+    return profiles
+
+
 def capture_frame(
     candidate: dict[str, Any],
     output_dir: Path,
@@ -138,63 +160,122 @@ def capture_frame(
 
     node = candidate["node"]
     cv2.setNumThreads(1)
-    capture = cv2.VideoCapture(node, cv2.CAP_V4L2)
+    attempts: list[dict[str, Any]] = []
+    frame = None
+    actual_profile: dict[str, Any] = {}
+    successful_profile: dict[str, Any] | None = None
+
+    for profile in capture_profiles(candidate["formats"]):
+        capture = cv2.VideoCapture(node, cv2.CAP_V4L2)
+        try:
+            if not capture.isOpened():
+                attempts.append({"profile": profile["name"], "error": "open failed"})
+                # FOURCC and resolution are configured only after opening, so
+                # repeating profiles cannot recover an open-level failure.
+                break
+            if profile["configure"]:
+                if profile["fourcc"]:
+                    capture.set(
+                        cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*profile["fourcc"])
+                    )
+                capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                capture.set(cv2.CAP_PROP_FPS, fps)
+
+            current_frame = None
+            for _ in range(max(1, warmup_frames + 1)):
+                ok, value = capture.read()
+                if ok and value is not None:
+                    current_frame = value
+            if current_frame is None:
+                attempts.append({"profile": profile["name"], "error": "read failed"})
+                continue
+
+            frame = current_frame
+            successful_profile = profile
+            actual_profile = {
+                "width": int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                "height": int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                "fps": float(capture.get(cv2.CAP_PROP_FPS)),
+            }
+            attempts.append({"profile": profile["name"], "ok": True})
+            break
+        except Exception as exc:  # pragma: no cover - hardware/backend dependent
+            attempts.append({"profile": profile["name"], "error": str(exc)})
+        finally:
+            capture.release()
+
+    if frame is None:
+        return {
+            "ok": False,
+            "error": "all OpenCV capture profiles failed",
+            "attempts": attempts,
+        }
+
     try:
-        if not capture.isOpened():
-            return {"ok": False, "error": "VideoCapture could not open the node"}
+        original_shape = tuple(frame.shape)
+        if frame.ndim == 2:
+            display_frame = frame
+        elif frame.ndim == 3 and frame.shape[2] == 1:
+            display_frame = frame[:, :, 0]
+        elif frame.ndim == 3 and frame.shape[2] == 2:
+            display_frame = frame[:, :, 0]
+        elif frame.ndim == 3 and frame.shape[2] >= 3:
+            display_frame = frame[:, :, :3]
+        else:
+            return {
+                "ok": False,
+                "error": f"unsupported frame shape: {original_shape}",
+                "attempts": attempts,
+            }
 
-        formats = candidate["formats"]
-        selected_fourcc = next(
-            (fmt for fmt in (*PREFERRED_RGB_FORMATS, *OTHER_COLOR_FORMATS) if fmt in formats),
-            None,
-        )
-        if selected_fourcc and len(selected_fourcc) == 4:
-            capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*selected_fourcc))
-        capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-        capture.set(cv2.CAP_PROP_FPS, fps)
-
-        frame = None
-        for _ in range(max(1, warmup_frames + 1)):
-            ok, current_frame = capture.read()
-            if ok:
-                frame = current_frame
-        if frame is None:
-            return {"ok": False, "error": "camera opened but returned no frame"}
-        if frame.ndim != 3 or frame.shape[2] != 3:
-            return {"ok": False, "error": f"unexpected frame shape: {tuple(frame.shape)}"}
+        if display_frame.dtype != np.uint8:
+            minimum = float(np.min(display_frame))
+            maximum = float(np.max(display_frame))
+            if maximum > minimum:
+                display_frame = ((display_frame - minimum) * (255.0 / (maximum - minimum))).astype(
+                    np.uint8
+                )
+            else:
+                display_frame = np.zeros(display_frame.shape, dtype=np.uint8)
 
         serial = candidate["udev"].get("ID_SERIAL_SHORT", "unknown-serial")
         filename = f"{Path(node).name}_{_safe_filename(serial)}.jpg"
         image_path = output_dir / filename
-        if not cv2.imwrite(str(image_path), frame):
-            return {"ok": False, "error": f"failed to write {image_path}"}
+        if not cv2.imwrite(str(image_path), display_frame):
+            return {"ok": False, "error": f"failed to write {image_path}", "attempts": attempts}
 
-        sample = frame.astype(np.int16)
-        channel_difference = float(
-            np.mean(
-                (
-                    np.abs(sample[:, :, 0] - sample[:, :, 1])
-                    + np.abs(sample[:, :, 1] - sample[:, :, 2])
-                    + np.abs(sample[:, :, 2] - sample[:, :, 0])
+        if display_frame.ndim == 3 and display_frame.shape[2] >= 3:
+            sample = display_frame[:, :, :3].astype(np.int16)
+        else:
+            sample = None
+        if sample is not None:
+            channel_difference = float(
+                np.mean(
+                    (
+                        np.abs(sample[:, :, 0] - sample[:, :, 1])
+                        + np.abs(sample[:, :, 1] - sample[:, :, 2])
+                        + np.abs(sample[:, :, 2] - sample[:, :, 0])
+                    )
+                    / 3.0
                 )
-                / 3.0
             )
-        )
+        else:
+            channel_difference = 0.0
         return {
             "ok": True,
             "image": str(image_path),
-            "shape": list(frame.shape),
-            "selected_fourcc": selected_fourcc,
-            "actual_width": int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)),
-            "actual_height": int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-            "actual_fps": float(capture.get(cv2.CAP_PROP_FPS)),
+            "shape": list(original_shape),
+            "capture_profile": successful_profile["name"],
+            "selected_fourcc": successful_profile["fourcc"],
+            "actual_width": actual_profile["width"],
+            "actual_height": actual_profile["height"],
+            "actual_fps": actual_profile["fps"],
             "channel_difference": channel_difference,
+            "attempts": attempts,
         }
     except Exception as exc:  # pragma: no cover - hardware/backend dependent
-        return {"ok": False, "error": str(exc)}
-    finally:
-        capture.release()
+        return {"ok": False, "error": str(exc), "attempts": attempts}
 
 
 def probe_rgb_cameras(
@@ -203,6 +284,7 @@ def probe_rgb_cameras(
     height: int = 480,
     fps: int = 30,
     warmup_frames: int = 5,
+    exhaustive: bool = True,
 ) -> tuple[Path, list[dict[str, Any]]]:
     if shutil.which("v4l2-ctl") is None:
         raise RuntimeError("v4l2-ctl is required; install the Linux package 'v4l-utils'")
@@ -215,17 +297,23 @@ def probe_rgb_cameras(
 
     for node in list_video_nodes():
         candidate = inspect_node(node)
-        if candidate["candidate_rank"] == 0:
-            continue
         candidate["recommended_path"] = preferred_device_path(candidate)
-        candidate["capture"] = capture_frame(
-            candidate, run_dir, width, height, fps, warmup_frames
-        )
+        if should_attempt_capture(candidate, exhaustive):
+            candidate["capture"] = capture_frame(
+                candidate, run_dir, width, height, fps, warmup_frames
+            )
+        else:
+            candidate["capture"] = {
+                "ok": False,
+                "skipped": True,
+                "error": "metadata-only node or excluded by typical-RGB-only mode",
+            }
         results.append(candidate)
 
     manifest = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "requested_profile": {"width": width, "height": height, "fps": fps},
+        "exhaustive": exhaustive,
         "candidates": results,
     }
     (run_dir / "manifest.json").write_text(
@@ -241,7 +329,7 @@ def _print_results(run_dir: Path, results: list[dict[str, Any]]) -> None:
         return
     for candidate in results:
         capture = candidate["capture"]
-        status = "SAVED" if capture["ok"] else "FAILED"
+        status = "SAVED" if capture["ok"] else ("SKIPPED" if capture.get("skipped") else "FAILED")
         print(f"\n[{status}] {candidate['node']}")
         print(f"  formats: {', '.join(candidate['formats'])}")
         print(f"  serial: {candidate['udev'].get('ID_SERIAL_SHORT', 'unknown')}")
@@ -266,9 +354,19 @@ def main() -> None:
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--warmup-frames", type=int, default=5)
+    parser.add_argument(
+        "--typical-rgb-only",
+        action="store_true",
+        help="only capture nodes advertising typical packed RGB FOURCC values",
+    )
     args = parser.parse_args()
     run_dir, results = probe_rgb_cameras(
-        args.output_dir, args.width, args.height, args.fps, args.warmup_frames
+        args.output_dir,
+        args.width,
+        args.height,
+        args.fps,
+        args.warmup_frames,
+        exhaustive=not args.typical_rgb_only,
     )
     _print_results(run_dir, results)
 
